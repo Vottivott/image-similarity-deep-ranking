@@ -1,9 +1,11 @@
+keep_aspect = False
+
 """Fairly basic set of tools for real-time data augmentation on image data.
-Can easily be extended to include new transformations,
-new preprocessing methods, etc...
+    Can easily be extended to include new transformations,
+    new preprocessing methods, etc...
 """
-#from __future__ import absolute_import
-#from __future__ import print_function
+# from __future__ import absolute_import
+# from __future__ import print_function
 
 import numpy as np
 import re
@@ -283,6 +285,23 @@ def img_to_array(img, data_format=None):
         raise ValueError('Unsupported image shape: ', x.shape)
     return x
 
+def make_square(im, min_size=256, fill_color=(0, 0, 0, 0)):
+    x, y = im.size
+    size = min(max_size, x, y)
+    new_im = pil_image.new('RGBA', target_size, fill_color)
+    new_im.paste(im, (int((size - x) / 2), int((size - y) / 2)))
+    return new_im
+
+def black_background_thumbnail(img, target_size):
+    background = pil_image.new('RGB', target_size, "black")
+    #img.thumbnail(thumbnail_size)
+    (w, h) = img.size
+    scale = min(target_size[0] / w, target_size[1] / h)
+    hw_tuple = (int(w*scale), int(h*scale))
+    scaled_img = img.resize(hw_tuple)
+    (w, h) = scaled_img.size
+    background.paste(scaled_img, ((target_size[0] - w) // 2, (target_size[1] - h) // 2 ))
+    return background
 
 def load_img(path, grayscale=False, target_size=None):
     """Loads an image into PIL format.
@@ -308,8 +327,13 @@ def load_img(path, grayscale=False, target_size=None):
             img = img.convert('RGB')
     if target_size:
         hw_tuple = (target_size[1], target_size[0])
-        if img.size != hw_tuple:
-            img = img.resize(hw_tuple)
+
+        if keep_aspect:
+            # Hannes: keep aspect ratio
+            img = black_background_thumbnail(img, target_size)
+        else:
+            if img.size != hw_tuple:
+                img = img.resize(hw_tuple)
     return img
 
 
@@ -320,7 +344,6 @@ def list_pictures(directory, ext='jpg|jpeg|bmp|png|ppm'):
 
 
 class ImageDataGeneratorCustom(object):
-    
     """Generate minibatches of image data with real-time data augmentation.
     # Arguments
         featurewise_center: set input mean to 0 over the dataset.
@@ -440,7 +463,7 @@ class ImageDataGeneratorCustom(object):
             save_prefix=save_prefix,
             save_format=save_format)
 
-    def flow_from_directory(self, directory,triplet_path,
+    def flow_from_directory(self, directory, triplet_path,
                             target_size=(256, 256), color_mode='rgb',
                             classes=None, class_mode='categorical',
                             batch_size=32, shuffle=True, seed=None,
@@ -449,9 +472,9 @@ class ImageDataGeneratorCustom(object):
                             save_format='png',
                             follow_links=False
                             ):
-        
+
         return DirectoryIterator(
-            directory, self,triplet_path,
+            directory, self, triplet_path,
             target_size=target_size, color_mode=color_mode,
             classes=classes, class_mode=class_mode,
             data_format=self.data_format,
@@ -565,8 +588,8 @@ class ImageDataGeneratorCustom(object):
 
         if shear != 0:
             shear_matrix = np.array([[1, -np.sin(shear), 0],
-                                    [0, np.cos(shear), 0],
-                                    [0, 0, 1]])
+                                     [0, np.cos(shear), 0],
+                                     [0, 0, 1]])
             transform_matrix = shear_matrix if transform_matrix is None else np.dot(transform_matrix, shear_matrix)
 
         if zx != 1 or zy != 1:
@@ -622,9 +645,11 @@ class ImageDataGeneratorCustom(object):
             warnings.warn(
                 'Expected input to be images (as Numpy array) '
                 'following the data format convention "' + self.data_format + '" '
-                '(channels on axis ' + str(self.channel_axis) + '), i.e. expected '
-                'either 1, 3 or 4 channels on axis ' + str(self.channel_axis) + '. '
-                'However, it was passed an array with shape ' + str(x.shape) +
+                                                                              '(channels on axis ' + str(
+                    self.channel_axis) + '), i.e. expected '
+                                         'either 1, 3 or 4 channels on axis ' + str(self.channel_axis) + '. '
+                                                                                                         'However, it was passed an array with shape ' + str(
+                    x.shape) +
                 ' (' + str(x.shape[self.channel_axis]) + ' channels).')
 
         if seed is not None:
@@ -668,16 +693,16 @@ class Iterator(object):
         seed: Random seeding for data shuffling.
     """
 
-    def __init__(self, n, batch_size, shuffle, seed,triplet_path):
+    def __init__(self, n, batch_size, shuffle, seed, triplet_path):
         count = 0
         f = open(triplet_path)
         f_read = f.read()
         for line in f_read.split('\n'):
-            if len(line)>1:
+            if len(line) > 1:
                 count += 1
         f.close()
-        self.n = count * 3#n
-        
+        self.n = count * 3  # n
+
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.batch_index = 0
@@ -691,7 +716,7 @@ class Iterator(object):
     def _flow_index(self, n, batch_size=32, shuffle=False, seed=None):
         # Ensure self.batch_index is 0.
         self.reset()
-        
+
         while 1:
             if seed is not None:
                 np.random.seed(seed + self.total_batches_seen)
@@ -701,7 +726,7 @@ class Iterator(object):
                     index_array = np.random.permutation(n)
 
             current_index = (self.batch_index * batch_size) % n
-            
+
             if n > current_index + batch_size:
                 current_batch_size = batch_size
                 self.batch_index += 1
@@ -764,9 +789,11 @@ class NumpyArrayIterator(Iterator):
         if self.x.shape[channels_axis] not in {1, 3, 4}:
             warnings.warn('NumpyArrayIterator is set to use the '
                           'data format convention "' + data_format + '" '
-                          '(channels on axis ' + str(channels_axis) + '), i.e. expected '
-                          'either 1, 3 or 4 channels on axis ' + str(channels_axis) + '. '
-                          'However, it was passed an array with shape ' + str(self.x.shape) +
+                                                                     '(channels on axis ' + str(
+                channels_axis) + '), i.e. expected '
+                                 'either 1, 3 or 4 channels on axis ' + str(channels_axis) + '. '
+                                                                                             'However, it was passed an array with shape ' + str(
+                self.x.shape) +
                           ' (' + str(self.x.shape[channels_axis]) + ' channels).')
         if y is not None:
             self.y = np.asarray(y)
@@ -820,8 +847,10 @@ def _count_valid_files_in_directory(directory, white_list_formats, follow_links)
         the count of files with extension in `white_list_formats` contained in
         the directory.
     """
+
     def _recursive_list(subpath):
-        return sorted(os.walk(subpath, followlinks=follow_links), key=lambda tpl: tpl[0])
+        return sorted(os.walk(subpath))
+        # return sorted(os.walk(subpath, followlinks=follow_links), key=lambda tpl: tpl[0])
 
     samples = 0
     for root, _, files in _recursive_list(directory):
@@ -837,7 +866,7 @@ def _count_valid_files_in_directory(directory, white_list_formats, follow_links)
 
 
 def _list_valid_filenames_in_directory(directory, white_list_formats,
-                                       class_indices, follow_links,triplet_path):
+                                       class_indices, follow_links, triplet_path):
     """List paths of files in `subdir` relative from `directory` whose extensions are in `white_list_formats`.
     # Arguments
         directory: absolute path to a directory containing the files to list.
@@ -851,6 +880,7 @@ def _list_valid_filenames_in_directory(directory, white_list_formats,
             `directory`'s parent (e.g., if `directory` is "dataset/class1",
             the filenames will be ["class1/file1.jpg", "class1/file2.jpg", ...]).
     """
+
     def _recursive_list(subpath):
         f = open(triplet_path)
         f_read = f.read()
@@ -859,21 +889,31 @@ def _list_valid_filenames_in_directory(directory, white_list_formats,
         filenames = []
         for triplet in triplets:
             triplet = triplet.split(',')
-            if len(triplet)!=3:
+            for i in range(len(triplet)): # HANNES FIX
+                triplet[i] = triplet[i].replace('\r','')
+            if len(triplet) != 3:
                 continue
-            filenames +=[triplet[0]]
-            filenames +=[triplet[1]]
-            filenames +=[triplet[2]]
-        to_return_tuple= tuple()
-        to_return_tuple = (os.path.abspath(subpath),[],filenames,)
+            filenames += triplet
+        to_return_tuple = tuple()
+        to_return_tuple = (os.path.abspath(subpath), [], filenames,)
         return [to_return_tuple]
-        
+
     classes = []
     filenames = []
     subdir = os.path.basename(directory)
     basedir = os.path.dirname(directory)
+    debug = subdir == "q" and False
+    if debug:
+        print("directory: " + directory)
+        print("subdir: " + subdir)
+        print("basedir: " + basedir)
     for root, _, files in _recursive_list(directory):
-        for fname in files:
+        if debug:
+            print(files)
+        for i,fname in enumerate(files):
+            if debug:
+                print(i)
+                print("- %s" % fname)
             is_valid = False
             for extension in white_list_formats:
                 if fname.lower().endswith('.' + extension):
@@ -881,12 +921,99 @@ def _list_valid_filenames_in_directory(directory, white_list_formats,
                     break
             if is_valid:
                 classes.append(class_indices[subdir])
-                # add filename relative to directory
-                absolute_path = fname#os.path.join(root, fname)
-                filenames.append(os.path.relpath(absolute_path, basedir))
+                filenames.append(fname)
             else:
-                print (fname+" is not valid")
-    return classes, filenames
+                logging.warning(fname + " is not valid")
+                if debug:
+                    print(i)
+                    print("-- %s" % fname)
+                    print(" is not valid!")
+    return ["q", "p", "n"], filenames
+
+if False:
+    def _count_valid_files_in_directory(directory, white_list_formats, follow_links):
+        """Count files with extension in `white_list_formats` contained in a directory.
+        # Arguments
+            directory: absolute path to the directory containing files to be counted
+            white_list_formats: set of strings containing allowed extensions for
+                the files to be counted.
+        # Returns
+            the count of files with extension in `white_list_formats` contained in
+            the directory.
+        """
+
+        def _recursive_list(subpath):
+            return sorted(os.walk(subpath, followlinks=follow_links), key=lambda tpl: tpl[0])
+
+        samples = 0
+        for root, _, files in _recursive_list(directory):
+            for fname in files:
+                is_valid = False
+                for extension in white_list_formats:
+                    if fname.lower().endswith('.' + extension):
+                        is_valid = True
+                        break
+                if is_valid:
+                    samples += 1
+        return samples
+
+
+    def _list_valid_filenames_in_directory(directory, white_list_formats,
+                                           class_indices, follow_links, triplet_path):
+        """List paths of files in `subdir` relative from `directory` whose extensions are in `white_list_formats`.
+        # Arguments
+            directory: absolute path to a directory containing the files to list.
+                The directory name is used as class label and must be a key of `class_indices`.
+            white_list_formats: set of strings containing allowed extensions for
+                the files to be counted.
+            class_indices: dictionary mapping a class name to its index.
+        # Returns
+            classes: a list of class indices
+            filenames: the path of valid files in `directory`, relative from
+                `directory`'s parent (e.g., if `directory` is "dataset/class1",
+                the filenames will be ["class1/file1.jpg", "class1/file2.jpg", ...]).
+        """
+
+        def _recursive_list(subpath):
+            f = open(triplet_path)
+            f_read = f.read()
+            triplets = f_read.split('\n')
+            f.close()
+            filenames = []
+            for triplet in triplets:
+                print(triplet)
+                triplet = triplet.split(',')
+                for i in range(len(triplet)): # HANNES FIX
+                    triplet[i] = triplet[i].replace('\r','')
+                if len(triplet) != 3:
+                    continue
+                filenames += [triplet[0]]
+                filenames += [triplet[1]]
+                filenames += [triplet[2]]
+            to_return_tuple = tuple()
+            to_return_tuple = (os.path.abspath(subpath), [], filenames,)
+            return [to_return_tuple]
+
+        classes = []
+        filenames = []
+        subdir = os.path.basename(directory)
+        basedir = os.path.dirname(directory)
+        for root, _, files in _recursive_list(directory):
+            for fname in files:
+                print(fname)
+                is_valid = False
+                for extension in white_list_formats:
+                    if fname.lower().endswith('.' + extension):
+                        is_valid = True
+                        break
+                if is_valid:
+                    classes.append(class_indices[subdir])
+                    # add filename relative to directory
+                    absolute_path = fname  # os.path.join(root, fname)
+                    filenames.append(os.path.relpath(absolute_path, basedir))
+                else:
+                    print(fname + " is not valid")
+        return classes, filenames
 
 
 class DirectoryIterator(Iterator):
@@ -925,7 +1052,7 @@ class DirectoryIterator(Iterator):
             (if `save_to_dir` is set).
     """
 
-    def __init__(self, directory, image_data_generator,triplet_path,
+    def __init__(self, directory, image_data_generator, triplet_path,
                  target_size=(256, 256), color_mode='rgb',
                  classes=None, class_mode='categorical',
                  batch_size=32, shuffle=True, seed=None,
@@ -974,6 +1101,12 @@ class DirectoryIterator(Iterator):
             for subdir in sorted(os.listdir(directory)):
                 if os.path.isdir(os.path.join(directory, subdir)):
                     classes.append(subdir)
+
+        classes = ["q", "p", "n"]
+        self.num_class = len(classes)
+        self.class_indices = dict(zip(classes, range(len(classes))))
+
+
         self.num_class = len(classes)
         self.class_indices = dict(zip(classes, range(len(classes))))
 
@@ -996,16 +1129,16 @@ class DirectoryIterator(Iterator):
         for dirpath in (os.path.join(directory, subdir) for subdir in classes):
             results.append(pool.apply_async(_list_valid_filenames_in_directory,
                                             (dirpath, white_list_formats,
-                                             self.class_indices, follow_links,triplet_path)))
+                                             self.class_indices, follow_links, triplet_path)))
         for res in results:
             classes, filenames = res.get()
-            #self.classes = np.zeros((len(filenames),), dtype='int32')
-            #self.classes[i:i + len(classes)] = classes
+            # self.classes = np.zeros((len(filenames),), dtype='int32')
+            # self.classes[i:i + len(classes)] = classes
             self.filenames += filenames
             i += len(classes)
         pool.close()
         pool.join()
-        super(DirectoryIterator, self).__init__(self.samples, batch_size, shuffle, seed,triplet_path)
+        super(DirectoryIterator, self).__init__(self.samples, batch_size, shuffle, seed, triplet_path)
 
     def next(self):
         """For python 2.x.
@@ -1050,4 +1183,4 @@ class DirectoryIterator(Iterator):
                 batch_y[i, label] = 1.
         else:
             return batch_x
-        return [batch_x,batch_x,batch_x], batch_y
+        return [batch_x, batch_x, batch_x], batch_y
